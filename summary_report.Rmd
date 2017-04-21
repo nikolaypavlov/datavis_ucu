@@ -1,0 +1,285 @@
+---
+title: "Аналіз вантажообігу портів України в 2016 році"
+author: "Микола Павлов"
+date: "21.04.2017"
+output:
+  github_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, fig.width = 12, fig.height = 8)
+```
+
+```{r, include=FALSE, warning=FALSE, echo=FALSE}
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(forcats)
+library(viridis)
+```
+
+```{r, eval=FALSE}
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(forcats)
+library(viridis)
+```
+
+## Завантаження даних
+
+Дані були завантажени [з реєстру судозаходів на сайті data.gov.ua](http://data.gov.ua/passport/08e7925e-4e38-47d1-abe2-d9dd30cab29e).
+
+```{r}
+ports <- read_csv("data/data.csv", 
+                  col_types = 'c_?t?tccccnccnc_', 
+                  na = c('', 'БН', 'бн')) %>%
+  rename(port = `Назва порту`, 
+         arrival = `Дата приходу судна`,
+         arrival_time = `Час приходу судна (24-годинний формат)`,
+         departure = `Дата відходу судна`,
+         departure_time = `Час відходу судна (24-годинний формат)`,
+         vessel_id = `ІМО № судна`,
+         vessel_name = `Назва судна`,
+         vessel_type = `Тип судна (згідно з документами)`,
+         flag = `Прапор`,
+         deadweight = `Дедвейт (тонни)`,
+         purpose = `Мета заходу (завантаження/ розвантаження/ круіз)`,
+         cargo = `Назва вантажу`,
+         cargo_weight = `Загальна кількість вантажу тис. тонн`,
+         company = `Компанія з агентування судна`) %>%
+  filter(row_number(port) != 1) %>%
+  mutate_at(vars(port, vessel_type, cargo, flag, purpose), str_to_title) %>%
+  mutate(cargo_weight = cargo_weight * 1000) %>%
+  mutate(port = factor(port),
+         vessel_type = factor(vessel_type), 
+         purpose = factor(purpose),
+         cargo = factor(cargo))
+
+ports
+```
+
+
+## Очищення даних
+
+Почнемо з перевірки унікальних категорій.
+
+```{r}
+# Print factors
+fct <- ports %>% 
+  select_if(is.factor)
+
+levels(fct$port)
+```
+
+```{r}
+levels(fct$cargo)
+```
+
+```{r}
+levels(fct$vessel_type)
+```
+
+```{r}
+levels(fct$purpose)
+```
+
+Деякі категорії дублюються на різних мовах або мають близьке значення. Спростимо список і зменшимо їх кількість.
+
+```{r}
+ports <- ports %>%
+  mutate(purpose = str_replace(purpose, "Выгрузка", "Розвантаження")) %>% 
+  mutate(purpose = str_replace(purpose, "Погрузка", "Завантаження")) %>%
+  mutate(purpose = str_replace(purpose, "Навантаження", "Завантаження")) %>%
+  mutate(cargo = str_replace(cargo, "Ячмень", "Ячмінь")) %>%
+  mutate(cargo = str_replace(cargo, "(Нафт.*|Нефт.*)", "Нафтопродукти")) %>%
+  mutate(cargo = str_replace(cargo, "Масло.*", "Олія")) %>%
+  mutate(cargo = str_replace(cargo, "Мет/Лом", "Металобрухт")) %>%
+  mutate(cargo = str_replace(cargo, "Металл", "Метал")) %>%
+  mutate(cargo = str_replace(cargo, "Оборуд", "Обладнання")) %>%
+  mutate(cargo = str_replace(cargo, "Чугун", "Чавун")) %>%
+  mutate(cargo = str_replace(cargo, "Окат.*", "Окатиші")) %>%
+  mutate(cargo = str_replace(cargo, "Руда.*", "Руда")) %>%
+  mutate(cargo = str_replace(cargo, "Сера.*", "Сера")) %>%
+  mutate(cargo = str_replace(cargo, "Сера.*", "Сера")) %>%
+  mutate(cargo = str_replace(cargo, "Лісні Вантажі", "Деревина")) %>%
+  mutate(cargo = str_replace(cargo, "Кукуруз", "Кукурудза")) %>%
+  mutate(cargo = str_replace(cargo, "Кукуруз", "Кукурудза")) %>%
+  mutate(cargo = str_replace(cargo, "Будівель.*", "Будівельні")) %>%
+  mutate(cargo = str_replace(cargo, "А/Техн", "Автотехніка")) %>%
+  mutate(cargo = str_replace(cargo, " - Всього", "")) %>%
+  mutate(cargo = str_replace(cargo, ".*Добрива.*", "Добрива")) %>%
+  mutate(cargo = str_replace(cargo, "Цитрус.*", "Цитрусові")) %>%
+  mutate(cargo = str_replace(cargo, "(Ф|Фс)/.*", "Феросплави")) %>%
+  mutate(cargo = str_replace(cargo, "Пшеница", "Пшениця")) %>%
+  mutate(cargo = str_replace(cargo, "(Хлібні.*|Ячмінь|Пшениця|Зерно)", "Зернові")) %>%
+  mutate(cargo = str_replace(cargo, "Конт.*", "Контейнери")) %>%
+  mutate(cargo = str_replace(cargo, "Авто.*", "Автотехніка")) %>%
+  mutate(cargo = str_replace(cargo, "Інші ", "")) %>%
+  mutate(cargo = fct_drop(cargo)) %>%
+  mutate(purpose = fct_drop(purpose))
+
+```
+
+Перевіримо на статистики змінних.
+
+```{r}
+summary(ports)
+```
+
+Видно, що в змінних `deadweight` та `cargo_weight` є аномально великі значення.
+Зі [списку найбільш вантажних кораблів](https://en.wikipedia.org/wiki/List_of_largest_ships_by_gross_tonnage) випливає, що максимальний `deadweight` діючих суден не перевищує 234 006 тонн. 
+Подивимося які кораблі є викидами.
+
+```{r}
+max_deadweight <- 234006
+ports %>% 
+  filter(deadweight > max_deadweight) %>%
+  distinct(vessel_name, deadweight)
+```
+
+Виходячи [зі знайденої інформації](http://www.marinetraffic.com/en/ais/details/ships/shipid:688863/mmsi:477694800/imo:9683269/vessel:KSL_SYDNEY) судно `KSL SYDNEY` має `deadweight` 181 009 тонн. Тоннаж судна `DJANKOY` не був знайдений, тому було прийнято рішення прибрати цей корабель з набору даних.
+
+```{r}
+ksl_sydney <- 181009
+ports <- ports %>%
+  mutate(deadweight = ifelse(vessel_name == 'KSL SYDNEY', ksl_sydney, deadweight)) %>%
+  filter(vessel_name != "DJANKOY") %>%
+  filter(deadweight >= cargo_weight) 
+```
+
+## Дослідження даних
+
+Почнемо з гістограми тоннажу вантажів по портах України. Бачимо, що більшість вантажних операцій припадає на невеликі вантажні судна.
+
+```{r}
+library(ggplot2)
+ggplot(ports) +
+  geom_histogram(aes(x = cargo_weight), bins = 30) +
+  facet_wrap(~port)
+```
+
+Подивимося на бокс плот, щоб оцінити розкид тоннажу.
+
+```{r}
+ggplot(ports) +
+  geom_boxplot(aes(x = port, y = cargo_weight)) + 
+  coord_flip()
+```
+
+Для зручності відсортуємо порти в порядку зменшення вантажообігу. Бачимо, що порти Південний, Миколаївський і Маріупольський найбільші по тоннажу.
+
+```{r}
+ggplot(ports) +
+  geom_boxplot(aes(x = fct_reorder(port, cargo_weight, sum), y = cargo_weight)) + 
+  coord_flip()
+```
+
+Попередній графік проте не дає уявлення про кількість операцій. Тут же видно, що порти в Ізмаїлі, Миколаєві та Херсоні перевершують інші за кількістю операцій за рахунок обслуговування кораблів з більш низьким тоннажем.
+
+```{r}
+ggplot(ports) +
+  geom_jitter(aes(x = fct_reorder(port, cargo_weight, length), y = cargo_weight), 
+              size = rel(0.2),
+              alpha = 0.5) + 
+  coord_flip()
+```
+
+
+Цікаво подивитися на які види вантажів припадає найбільше вантажообігу. 
+Схоже це Руда, Зернові і Чорні метали.
+
+```{r}
+ports %>%
+  filter(!is.na(cargo)) %>%
+  ggplot() +
+  geom_jitter(aes(x = fct_reorder(cargo, cargo_weight, sum), y = cargo_weight), 
+              size = rel(0.2),
+              alpha = 0.5) + 
+  coord_flip()
+```
+
+Тепер подивимося на вантажообіг портів по типу вантажів. Оскільки категорій вантажів кілька десятків, залишимо тільки 30 найбільш часто зустрічаються, інші об'єднаємо в одну категорію.
+
+```{r}
+other <- "Інші"
+ports_by_cargo <- ports %>% 
+  filter(!is.na(cargo)) %>%
+  mutate(cargo = fct_lump(cargo, n = 30, other_level = other)) %>%
+  group_by(port, cargo) %>%
+  summarise(net_weight = sum(cargo_weight)) %>%
+  mutate(net_weight = net_weight / 1e6) %>%
+  arrange(desc(net_weight))
+
+ggplot(ports_by_cargo) +
+  geom_point(aes(x = fct_reorder(cargo, net_weight, .desc = T),
+                 y = fct_reorder(port, net_weight),
+                 size = net_weight),
+             alpha = 0.5, 
+             color = "red") + 
+  scale_size("Млн. тонн", range = c(5, 20), breaks = c(0, .1, 1, 5, 15, 30))
+```
+
+Трохи розширимо межі графіка, додамо підписи, повернемо мітки по осі X і спростимо тему.
+
+```{r}
+ggplot(ports_by_cargo) +
+  geom_point(aes(x = fct_reorder(cargo, net_weight, .desc = T),
+                 y = fct_reorder(port, net_weight),
+                 size = net_weight),
+             alpha = 0.5, 
+             color = "red") + 
+  scale_size("Млн. тонн", range = c(5, 20), breaks = c(0, .1, 1, 5, 15, 30)) +
+  scale_x_discrete(expand = c(0, 1.5)) +
+  scale_y_discrete(expand = c(0, 1.5)) +
+  labs(x = "Тип вантажу", 
+       y = "Порт", 
+       title = 'Вантажообіг портів України',
+       subtitle = '2016 рік',
+       caption = '\nДані: data.gov.ua') +
+  theme_minimal() +
+  theme(text = element_text(family = "Tahoma")) +
+  theme(axis.text = element_text(size = 9)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+
+```
+
+Змінимо розміри шрифтів, перенесемо легенду вгору, спростимо сітку і додамо відступи. Це і буде наша фінальна візуалізація.
+
+Цікаво відзначити, що порт Південний є найбільшим перевізником Руди, Миколаївський порт - Зернових, а порт в Маріуполі - чорних металів. Іллічівський морський порт перевозить практично всі категорії товарів і не має чіткої спеціалізації.
+
+```{r}
+p <- ggplot(ports_by_cargo) +
+  geom_point(aes(x = fct_reorder(cargo, net_weight, .desc = T),
+                 y = fct_reorder(port, net_weight),
+                 size = net_weight),
+             alpha = 0.5, 
+             color = "red") + 
+  scale_size("Млн. тонн", range = c(5, 20), breaks = c(0, .1, 1, 5, 15, 30)) +
+  scale_x_discrete(expand = c(0, 1.5)) +
+  scale_y_discrete(expand = c(0, 1.5)) +
+  labs(x = "Тип вантажу", 
+       y = "Порт", 
+       title = 'Вантажообіг портів України',
+       subtitle = '2016 рік',
+       caption = '\nДані: data.gov.ua') + 
+  theme_minimal() +
+  theme(text = element_text(family = "Tahoma")) +
+  theme(axis.text = element_text(size = 9)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+  theme(plot.title = element_text(face = 'bold', size = 16)) + 
+  theme(plot.subtitle = element_text(size = 12)) +
+  theme(panel.grid = element_line(linetype = 'dotted', size = 0.5)) +
+  theme(plot.margin = unit(rep(1, 4), 'cm')) +
+  theme(legend.position = 'top') +
+  theme(legend.title = element_text(size = 8)) +
+  theme(legend.text = element_text(size = 8)) +
+  theme(legend.key.height = unit(2, "pt")) +
+  theme(legend.key.width = unit(25, "pt"))
+
+print(p)
+```
+  
+```{r, echo = F, include = F}
+save(p, file = "final_plot.Rdata")
+```

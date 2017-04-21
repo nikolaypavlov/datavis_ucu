@@ -1,0 +1,26 @@
+---
+title: "Вантажи портів України"
+author: "Микола Павлов"
+date: "21.04.2017"
+output: 
+  github_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 12, fig.height = 8)
+```
+
+```{r include=F, echo=F, warning=F}
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(forcats)
+library(viridis)
+load("final_plot.Rdata")
+```
+
+```{r, echo=F}
+print(p)
+```
+
+У 2016 році порт Південний став найбільшим перевізником Руди, Миколаївський порт - Зернових, а порт в Маріуполі - Чорних металів. Іллічівський морський порт перевозить практично всі категорії товарів і не має чіткої спеціалізації.
